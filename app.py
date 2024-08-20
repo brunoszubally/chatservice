@@ -4,6 +4,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import json
+from datetime import datetime
 import ftplib
 
 load_dotenv()  # Betölti a környezeti változókat a .env fájlból
@@ -55,9 +56,10 @@ def send_message():
 
     client, assistant = initialize_openai_client()
 
-    # Felhasználói üzenet mentése
+    # Felhasználói üzenet mentése dátummal és időbélyeggel
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conversations.setdefault(thread_id, [])
-    conversations[thread_id].append({"role": "user", "content": user_input})
+    conversations[thread_id].append({"role": "user", "content": user_input, "timestamp": timestamp})
 
     client.beta.threads.messages.create(
         thread_id=thread_id, role="user", content=user_input
@@ -75,8 +77,9 @@ def send_message():
                 assistant_response += delta
                 yield delta
 
-            # Asszisztens válasz mentése a beszélgetésbe
-            conversations[thread_id].append({"role": "assistant", "content": assistant_response})
+            # Asszisztens válasz mentése a beszélgetésbe dátummal és időbélyeggel
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conversations[thread_id].append({"role": "assistant", "content": assistant_response, "timestamp": timestamp})
 
             # A beszélgetés frissítése/mentése JSON fájlba
             file_name = save_conversation_to_file(thread_id)
@@ -92,15 +95,15 @@ def save_conversation_to_file(thread_id):
     try:
         # Ha a fájl már létezik, olvassuk be és frissítsük
         if os.path.exists(file_name):
-            with open(file_name, "r") as f:
+            with open(file_name, "r", encoding="utf-8") as f:
                 existing_data = json.load(f)
                 existing_data.extend(conversations[thread_id])
-            with open(file_name, "w") as f:
-                json.dump(existing_data, f, indent=4)
+            with open(file_name, "w", encoding="utf-8") as f:
+                json.dump(existing_data, f, ensure_ascii=False, indent=4)
         else:
             # Ha a fájl nem létezik, hozzuk létre és írjuk bele az adatokat
-            with open(file_name, "w") as f:
-                json.dump(conversations[thread_id], f, indent=4)
+            with open(file_name, "w", encoding="utf-8") as f:
+                json.dump(conversations[thread_id], f, ensure_ascii=False, indent=4)
     except Exception as e:
         print(f"Error saving conversation to file: {e}")
     
