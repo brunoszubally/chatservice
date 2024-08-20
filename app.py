@@ -16,7 +16,7 @@ class Config:
     INSTRUCTIONS = os.getenv("INSTRUCTIONS")
     FTP_SERVER = "ftp.abydosai.com"
     FTP_USER = "u938222440.openai"
-    FTP_PASS = "Vilaguralo1472"
+    FTP_PASS = "Vilaguralom1472"
 
 def initialize_openai_client():
     """Initializes and returns the OpenAI client along with the assistant object."""
