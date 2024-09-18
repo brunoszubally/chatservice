@@ -101,7 +101,7 @@ def send_message():
 
     return Response(generate(), content_type='text/plain')
 
-ddef save_conversation_to_file(thread_id):
+def save_conversation_to_file(thread_id):
     """Mentés vagy frissítés JSON fájlba, PDF generálása mellé."""
     json_file_name = f"{thread_id}.json"
     try:
