@@ -18,6 +18,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+import threading  # Időzítő
 
 load_dotenv()  # Betölti a környezeti változókat a .env fájlból
 
@@ -42,6 +43,8 @@ class Config:
     SMTP_PASS = os.getenv("SMTP_PASS")
     RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 
+# Globális változó az időzítőhöz
+email_timer = None
 
 def send_email_with_pdf(pdf_file):
     """E-mail küldése a PDF fájllal mellékletként."""
@@ -80,9 +83,18 @@ def send_email_with_pdf(pdf_file):
     except Exception as e:
         print(f"E-mail küldési hiba: {e}")
 
+def start_email_timer(thread_id, pdf_file_name):
+    """Elindít egy időzítőt, amely 10 perc múlva elküldi a PDF-et."""
+    global email_timer
+    
+    # Ha már van egy időzítő, töröljük (új üzenet érkezett, újra kell indítani)
+    if email_timer is not None:
+        email_timer.cancel()
 
-
-
+    # Új időzítő indítása (10 perc = 600 másodperc)
+    email_timer = threading.Timer(600, send_email_with_pdf, [pdf_file_name])
+    email_timer.start()
+    print(f"E-mail időzítő beállítva a PDF küldésére 10 perc múlva a {thread_id}-hoz.")
 
 def initialize_openai_client():
     """Initializes and returns the OpenAI client along with the assistant object."""
@@ -179,16 +191,13 @@ def save_conversation_to_file(thread_id):
         upload_to_ftp(json_file_name)  # JSON fájl feltöltése
         upload_to_ftp(pdf_file_name)   # PDF fájl feltöltése
         
-        # PDF elküldése e-mailben
-        send_email_with_pdf(pdf_file_name)  # PDF fájl elküldése e-mailben
+        # E-mail időzítő elindítása (10 perc múlva küldjük el az e-mailt)
+        start_email_timer(thread_id, pdf_file_name)
 
     except Exception as e:
         print(f"Error saving conversation to file: {e}")
     
     return json_file_name
-
-
-
 
 # Define styles for PDF generation
 styles = getSampleStyleSheet()
@@ -212,8 +221,6 @@ assistant_style = ParagraphStyle(
     backColor=colors.whitesmoke,
     alignment=0  # Left align for assistant messages
 )
-
-
 
 def create_pdf(thread_id, conversation_data):
     """Generates a PDF file of the entire conversation."""
@@ -242,39 +249,9 @@ def create_pdf(thread_id, conversation_data):
     
     return file_name  # Csak a fájlnév visszaadása
 
-
-
 def sanitize_text(content):
     """Removes unwanted patterns like sources from the text."""
     return re.sub(r"【\d+:\d+†[\w\.]+】", '', content)
-
-def process_content_unordered(content):
-    """Handles unordered lists in the content."""
-    lines = content.splitlines()
-    elements = []
-    list_items = []
-
-    for line in lines:
-        if re.match(r"^\d+\.\s", line):  # Detect numbered list but treat it as unordered
-            list_items.append(line)
-        elif list_items:
-            elements.append(create_unordered_list_flowable(list_items))
-            list_items = []
-            elements.append(Paragraph(line, assistant_style))
-        else:
-            elements.append(Paragraph(line, assistant_style))
-    
-    if list_items:
-        elements.append(create_unordered_list_flowable(list_items))
-    
-    return elements
-
-def create_unordered_list_flowable(items):
-    """Creates an unordered list in the PDF."""
-    return ListFlowable(
-        [ListItem(Paragraph(item, assistant_style), bulletType='bullet') for item in items],
-        bulletType='bullet'
-    )
 
 def upload_to_ftp(file_name):
     """Fájl feltöltése az FTP szerverre."""
