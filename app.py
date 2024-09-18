@@ -44,6 +44,9 @@ class Config:
     SMTP_PASS = os.getenv("SMTP_PASS")
     RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 
+    # Engedélyezett domainek beállítása
+    ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",")
+
 # Tároló a beszélgetések és időzítők számára
 conversations = {}
 email_timers = {}
@@ -106,7 +109,7 @@ async def initialize_openai_client():
     return client, assistant
 
 app = Quart(__name__, static_folder='static')
-cors(app)
+app = cors(app, allow_origin=Config.ALLOWED_ORIGINS)
 
 @app.route('/')
 async def index():
