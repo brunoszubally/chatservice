@@ -103,29 +103,34 @@ def send_message():
 
 def save_conversation_to_file(thread_id):
     """Mentés vagy frissítés JSON fájlba, PDF generálása mellé."""
-    file_name = f"{thread_id}.json"
+    json_file_name = f"{thread_id}.json"
     try:
         # Ha a fájl létezik, frissítsük a meglévő adatokat
         existing_data = []
-        if os.path.exists(file_name):
-            with open(file_name, "r", encoding="utf-8") as f:
+        if os.path.exists(json_file_name):
+            with open(json_file_name, "r", encoding="utf-8") as f:
                 existing_data = json.load(f)
 
         # Új üzenetek hozzáadása
         new_messages = [msg for msg in conversations[thread_id] if msg not in existing_data]
         if new_messages:
             existing_data.extend(new_messages)
-            with open(file_name, "w", encoding="utf-8") as f:
+            with open(json_file_name, "w", encoding="utf-8") as f:
                 json.dump(existing_data, f, ensure_ascii=False, indent=4)
 
         # PDF generálása a beszélgetésből
-        pdf_file = create_pdf(thread_id, conversations[thread_id])
-        print(f"PDF generated: {pdf_file}")
+        pdf_file_name = create_pdf(thread_id, conversations[thread_id])
+        print(f"PDF generated: {pdf_file_name}")
         
+        # Mind a JSON, mind a PDF fájlok feltöltése az FTP-re
+        upload_to_ftp(json_file_name)  # JSON fájl feltöltése
+        upload_to_ftp(pdf_file_name)   # PDF fájl feltöltése
+
     except Exception as e:
         print(f"Error saving conversation to file: {e}")
     
-    return file_name
+    return json_file_name
+
 
 def create_pdf(thread_id, conversation_data):
     """Generates a PDF file of the conversation."""
