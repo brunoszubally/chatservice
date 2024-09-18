@@ -141,7 +141,7 @@ async def send_message():
             assistant_response = ""
             async for delta in stream.text_deltas:
                 assistant_response += delta
-                yield delta
+                yield json.dumps({"message": delta})
 
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             conversations[thread_id].append({"role": "assistant", "content": assistant_response, "timestamp": timestamp})
@@ -150,12 +150,10 @@ async def send_message():
             qa_count[thread_id] += 1
 
             # Ha elértük a 10 kérdés-választ, jelezzük a frontendnek
-            if qa_count[thread_id] >= 4:
+            if qa_count[thread_id] >= 10:
                 yield json.dumps({"show_button": True}) + "\n"
-            else:
-                yield json.dumps({"message": assistant_response}) + "\n"
 
-    return Response(generate(), content_type='text/plain')
+    return Response(generate(), content_type='application/json')
 
 async def save_conversation_to_file(thread_id):
     json_file_name = f"{thread_id}.json"
