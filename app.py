@@ -45,35 +45,31 @@ class Config:
 
 def send_email_with_pdf(pdf_file):
     """E-mail küldése a PDF fájllal mellékletként."""
-    # SMTP beállítások a Config osztályból
     smtp_server = Config.SMTP_SERVER
     smtp_port = Config.SMTP_PORT
     smtp_user = Config.SMTP_USER
     smtp_password = Config.SMTP_PASS
     recipient_email = Config.RECIPIENT_EMAIL
 
-    # E-mail feladó és címzett
     from_email = smtp_user
     to_email = recipient_email
 
-    # E-mail üzenet összeállítása
     msg = MIMEMultipart()
     msg['From'] = from_email
     msg['To'] = to_email
     msg['Subject'] = "Beszélgetés PDF melléklete"
 
-    # E-mail törzs
     body = "Kérem, találja mellékelve a generált PDF fájlt a beszélgetésről."
     msg.attach(MIMEText(body, 'plain'))
 
     # PDF melléklet csatolása
-    with open(pdf_file, "rb") as f:
-        attach = MIMEApplication(f.read(), _subtype="pdf")
-        attach.add_header('Content-Disposition', 'attachment', filename=pdf_file)
-        msg.attach(attach)
-
-    # Kapcsolódás az SMTP szerverhez és e-mail küldése
     try:
+        with open(pdf_file, "rb") as f:
+            attach = MIMEApplication(f.read(), _subtype="pdf")
+            attach.add_header('Content-Disposition', 'attachment', filename=pdf_file)
+            msg.attach(attach)
+
+        # Kapcsolódás az SMTP szerverhez és e-mail küldése
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
         server.login(smtp_user, smtp_password)
@@ -83,6 +79,7 @@ def send_email_with_pdf(pdf_file):
         print(f"E-mail sikeresen elküldve {to_email} címre.")
     except Exception as e:
         print(f"E-mail küldési hiba: {e}")
+
 
 
 
@@ -174,7 +171,7 @@ def save_conversation_to_file(thread_id):
             with open(json_file_name, "w", encoding="utf-8") as f:
                 json.dump(existing_data, f, ensure_ascii=False, indent=4)
 
-        # PDF generálása a beszélgetésből
+        # PDF generálása a teljes beszélgetésről
         pdf_file_name = create_pdf(thread_id, conversations[thread_id])
         print(f"PDF generated: {pdf_file_name}")
         
@@ -189,6 +186,7 @@ def save_conversation_to_file(thread_id):
         print(f"Error saving conversation to file: {e}")
     
     return json_file_name
+
 
 
 
@@ -218,30 +216,28 @@ assistant_style = ParagraphStyle(
 
 
 def create_pdf(thread_id, conversation_data):
-    """Generates a PDF file of the conversation."""
+    """Generates a PDF file of the entire conversation."""
     file_name = f"{thread_id}.pdf"
-    pdf_path = os.path.join(os.getcwd(), file_name)  # Mentés a futási könyvtárba
+    pdf_path = os.path.join(os.getcwd(), file_name)  # PDF fájl mentése a futási könyvtárba
     
     story = []
     doc = SimpleDocTemplate(pdf_path, pagesize=letter, rightMargin=50, leftMargin=50, topMargin=50, bottomMargin=50)
 
-    for i in range(0, len(conversation_data), 2):
-        if i < len(conversation_data) - 1:
-            user_message = conversation_data[i]
-            assistant_message = conversation_data[i + 1]
+    # Végigmegyünk az összes beszélgetésen
+    for message in conversation_data:
+        role = "Felhasználó" if message["role"] == "user" else "Asszisztens"
+        content = sanitize_text(message["content"])
+        timestamp = message["timestamp"]
 
-            # Add user message (question)
-            user_role_paragraph = Paragraph(f"<b>Felhasználó ({user_message['timestamp']}):</b>", user_style)
-            user_content_paragraph = Paragraph(sanitize_text(user_message["content"]), user_style)
+        role_paragraph = Paragraph(f"<b>{role} ({timestamp}):</b>", user_style if role == "Felhasználó" else assistant_style)
+        content_paragraph = Paragraph(content, user_style if role == "Felhasználó" else assistant_style)
 
-            # Add assistant message (answer)
-            assistant_role_paragraph = Paragraph(f"<b>Asszisztens ({assistant_message['timestamp']}):</b>", assistant_style)
-            elements = process_content_unordered(sanitize_text(assistant_message["content"]))
+        # Mindig hozzáadjuk a beszélgetést a PDF-hez
+        story.append(role_paragraph)
+        story.append(content_paragraph)
+        story.append(Spacer(1, 0.2 * inch))
 
-            # Keep the question and answer together
-            story.append(KeepTogether([user_role_paragraph, user_content_paragraph, assistant_role_paragraph] + elements))
-            story.append(Spacer(1, 0.2 * inch))
-    
+    # PDF létrehozása
     doc.build(story)
     
     return file_name  # Csak a fájlnév visszaadása
