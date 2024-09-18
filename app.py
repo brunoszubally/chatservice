@@ -33,8 +33,8 @@ logging.basicConfig(level=logging.INFO)
 class Config:
     """Configuration class for hardcoded values."""
     API_KEY = os.getenv("API_KEY")
-    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
-    INSTRUCTIONS = os.getenv("INSTRUCTIONS", "You are a helpful assistant.")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL")
+    INSTRUCTIONS = os.getenv("INSTRUCTIONS")
     
     # SFTP beállítások
     SFTP_SERVER = os.getenv("SFTP_SERVER")
@@ -54,6 +54,7 @@ class Config:
 # Tároló a beszélgetések és időzítők számára
 conversations = {}
 email_tasks = {}
+exchange_counts = {}  # Új: Üzenetváltások számának nyomon követése
 
 async def send_email_with_pdf(pdf_file):
     """E-mail küldése a PDF fájllal mellékletként."""
@@ -125,6 +126,7 @@ async def start_chat():
 
     # Új beszélgetés indítása és mentése
     conversations[thread_id] = []
+    exchange_counts[thread_id] = 0  # Üzenetváltások számának inicializálása
     return jsonify({"thread_id": thread_id})
 
 @app.route('/send_message', methods=['POST'])
@@ -136,10 +138,17 @@ async def send_message():
     if not thread_id or not user_input:
         return jsonify({"error": "Missing thread_id or message"}), 400
 
+    # Ellenőrizzük, hogy a felhasználó nem érte-e el az üzenetküldési limitet
+    if exchange_counts.get(thread_id, 0) >= 3:
+        return jsonify({"error": "Conversation ended"}), 403
+
     # Felhasználói üzenet mentése dátummal és időbélyeggel
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conversations.setdefault(thread_id, [])
     conversations[thread_id].append({"role": "user", "content": user_input, "timestamp": timestamp})
+
+    # Üzenetváltások számának növelése
+    exchange_counts[thread_id] = exchange_counts.get(thread_id, 0) + 1
 
     # OpenAI API hívás előkészítése
     messages = [{"role": msg["role"], "content": msg["content"]} for msg in conversations[thread_id]]
@@ -172,6 +181,10 @@ async def send_message():
 
             # E-mail időzítő elindítása
             await start_email_timer(thread_id, f"{thread_id}.pdf")
+
+            # Ha az üzenetváltások száma elérte a 3-at, jelezzük a frontendnek
+            if exchange_counts[thread_id] >= 3:
+                yield '[CONVERSATION_ENDED]'
 
         except Exception as e:
             logging.error(f"Hiba az OpenAI API hívása során: {e}")
@@ -251,7 +264,7 @@ def create_pdf(thread_id, conversation_data):
 
 def sanitize_text(content):
     """Removes unwanted patterns like sources from the text."""
-    return re.sub(r"【\d+:\d+†[\w\.]+】", '', content)
+    return re.sub(r"【\d+:\d+†[\w\.]+】", '', content).replace('[CONVERSATION_ENDED]', '')
 
 async def upload_to_sftp(file_name):
     """Fájl feltöltése az SFTP szerverre."""
