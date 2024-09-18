@@ -2,8 +2,7 @@ quart
 quart-cors
 openai
 python-dotenv
-hypercorn
+asyncssh
 reportlab
-aiohttp
-
-
+aiosmtplib
+aiofiles
