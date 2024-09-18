@@ -14,6 +14,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.units import inch
 from reportlab.lib import colors
 import re
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 
 load_dotenv()  # Betölti a környezeti változókat a .env fájlból
 
@@ -27,9 +31,61 @@ class Config:
     ASSISTANT_KEY = os.getenv("ASSISTANT_KEY")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL")
     INSTRUCTIONS = os.getenv("INSTRUCTIONS")
-    FTP_SERVER = "ftp.abydosai.com"
-    FTP_USER = "u938222440.openai"
-    FTP_PASS = "Vilaguralom1472!"
+    FTP_SERVER = os.getenv("FTP_SERVER")
+    FTP_USER = os.getenv("FTP_USER")
+    FTP_PASS = os.getenv("FTP_PASS")
+    
+    # SMTP beállítások e-mail küldéshez
+    SMTP_SERVER = os.getenv("SMTP_SERVER")
+    SMTP_PORT = int(os.getenv("SMTP_PORT"))
+    SMTP_USER = os.getenv("SMTP_USER")
+    SMTP_PASS = os.getenv("SMTP_PASS")
+    RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
+
+
+def send_email_with_pdf(pdf_file):
+    """E-mail küldése a PDF fájllal mellékletként."""
+    # SMTP beállítások a Config osztályból
+    smtp_server = Config.SMTP_SERVER
+    smtp_port = Config.SMTP_PORT
+    smtp_user = Config.SMTP_USER
+    smtp_password = Config.SMTP_PASS
+    recipient_email = Config.RECIPIENT_EMAIL
+
+    # E-mail feladó és címzett
+    from_email = smtp_user
+    to_email = recipient_email
+
+    # E-mail üzenet összeállítása
+    msg = MIMEMultipart()
+    msg['From'] = from_email
+    msg['To'] = to_email
+    msg['Subject'] = "Beszélgetés PDF melléklete"
+
+    # E-mail törzs
+    body = "Kérem, találja mellékelve a generált PDF fájlt a beszélgetésről."
+    msg.attach(MIMEText(body, 'plain'))
+
+    # PDF melléklet csatolása
+    with open(pdf_file, "rb") as f:
+        attach = MIMEApplication(f.read(), _subtype="pdf")
+        attach.add_header('Content-Disposition', 'attachment', filename=pdf_file)
+        msg.attach(attach)
+
+    # Kapcsolódás az SMTP szerverhez és e-mail küldése
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        text = msg.as_string()
+        server.sendmail(from_email, to_email, text)
+        server.quit()
+        print(f"E-mail sikeresen elküldve {to_email} címre.")
+    except Exception as e:
+        print(f"E-mail küldési hiba: {e}")
+
+
+
 
 def initialize_openai_client():
     """Initializes and returns the OpenAI client along with the assistant object."""
@@ -102,7 +158,7 @@ def send_message():
     return Response(generate(), content_type='text/plain')
 
 def save_conversation_to_file(thread_id):
-    """Mentés vagy frissítés JSON fájlba, PDF generálása mellé."""
+    """Mentés vagy frissítés JSON fájlba, PDF generálása mellé és e-mail küldés."""
     json_file_name = f"{thread_id}.json"
     try:
         # Ha a fájl létezik, frissítsük a meglévő adatokat
@@ -122,14 +178,18 @@ def save_conversation_to_file(thread_id):
         pdf_file_name = create_pdf(thread_id, conversations[thread_id])
         print(f"PDF generated: {pdf_file_name}")
         
-        # Mind a JSON, mind a PDF fájlok feltöltése az FTP-re
+        # JSON és PDF feltöltése FTP-re
         upload_to_ftp(json_file_name)  # JSON fájl feltöltése
         upload_to_ftp(pdf_file_name)   # PDF fájl feltöltése
+        
+        # PDF elküldése e-mailben
+        send_email_with_pdf(pdf_file_name)  # PDF fájl elküldése e-mailben
 
     except Exception as e:
         print(f"Error saving conversation to file: {e}")
     
     return json_file_name
+
 
 
 # Define styles for PDF generation
