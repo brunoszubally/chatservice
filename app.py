@@ -150,7 +150,7 @@ async def send_message():
             qa_count[thread_id] += 1
 
             # Ha elértük a 10 kérdés-választ, jelezzük a frontendnek
-            if qa_count[thread_id] >= 10:
+            if qa_count[thread_id] >= 4:
                 yield json.dumps({"show_button": True}) + "\n"
             else:
                 yield json.dumps({"message": assistant_response}) + "\n"
