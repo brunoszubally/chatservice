@@ -101,7 +101,7 @@ def send_message():
 
     return Response(generate(), content_type='text/plain')
 
-def save_conversation_to_file(thread_id):
+ddef save_conversation_to_file(thread_id):
     """Mentés vagy frissítés JSON fájlba, PDF generálása mellé."""
     json_file_name = f"{thread_id}.json"
     try:
@@ -130,6 +130,31 @@ def save_conversation_to_file(thread_id):
         print(f"Error saving conversation to file: {e}")
     
     return json_file_name
+
+
+# Define styles for PDF generation
+styles = getSampleStyleSheet()
+user_style = ParagraphStyle(
+    'UserStyle',
+    parent=styles['Normal'],
+    fontName='DejaVuSans-Bold',
+    fontSize=12,
+    leading=18,  # Increased line height for better readability
+    textColor=colors.black,
+    backColor=colors.lightgrey,
+    alignment=1  # Right align for user messages
+)
+assistant_style = ParagraphStyle(
+    'AssistantStyle',
+    parent=styles['Normal'],
+    fontName='DejaVuSans',
+    fontSize=12,
+    leading=18,  # Increased line height for better readability
+    textColor=colors.black,
+    backColor=colors.whitesmoke,
+    alignment=0  # Left align for assistant messages
+)
+
 
 
 def create_pdf(thread_id, conversation_data):
