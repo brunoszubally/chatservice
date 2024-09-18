@@ -92,7 +92,7 @@ def start_email_timer(thread_id, pdf_file_name):
         email_timer.cancel()
 
     # Új időzítő indítása (10 perc = 600 másodperc)
-    email_timer = threading.Timer(600, send_email_with_pdf, [pdf_file_name])
+    email_timer = threading.Timer(180, send_email_with_pdf, [pdf_file_name])
     email_timer.start()
     print(f"E-mail időzítő beállítva a PDF küldésére 10 perc múlva a {thread_id}-hoz.")
 
