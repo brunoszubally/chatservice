@@ -1,13 +1,13 @@
 from quart import Quart, request, jsonify, Response, send_from_directory
 from quart_cors import cors
 import asyncio
-import openai
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import os
 import json
 from datetime import datetime
-import asyncssh
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+import ftplib
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, KeepTogether
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase.ttfonts import TTFont
@@ -15,11 +15,11 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.units import inch
 from reportlab.lib import colors
 import re
-import aiosmtplib
-from email.message import EmailMessage
-import logging
-import aiofiles
-import uuid
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+import threading
 
 load_dotenv()  # Betölti a környezeti változókat a .env fájlból
 
@@ -27,19 +27,15 @@ load_dotenv()  # Betölti a környezeti változókat a .env fájlból
 pdfmetrics.registerFont(TTFont('DejaVuSans', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
 pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'))
 
-# Naplózás beállítása
-logging.basicConfig(level=logging.INFO)
-
 class Config:
     """Configuration class for hardcoded values."""
     API_KEY = os.getenv("API_KEY")
+    ASSISTANT_KEY = os.getenv("ASSISTANT_KEY")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL")
     INSTRUCTIONS = os.getenv("INSTRUCTIONS")
-    
-    # SFTP beállítások
-    SFTP_SERVER = os.getenv("SFTP_SERVER")
-    SFTP_USER = os.getenv("SFTP_USER")
-    SFTP_PASS = os.getenv("SFTP_PASS")
+    FTP_SERVER = os.getenv("FTP_SERVER")
+    FTP_USER = os.getenv("FTP_USER")
+    FTP_PASS = os.getenv("FTP_PASS")
     
     # SMTP beállítások e-mail küldéshez
     SMTP_SERVER = os.getenv("SMTP_SERVER")
@@ -49,14 +45,13 @@ class Config:
     RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 
     # Engedélyezett domainek beállítása
-    ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+    ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",")
 
 # Tároló a beszélgetések és időzítők számára
 conversations = {}
-email_tasks = {}
-exchange_counts = {}  # Új: Üzenetváltások számának nyomon követése
+email_timers = {}
 
-async def send_email_with_pdf(pdf_file):
+def send_email_with_pdf(pdf_file):
     """E-mail küldése a PDF fájllal mellékletként."""
     smtp_server = Config.SMTP_SERVER
     smtp_port = Config.SMTP_PORT
@@ -67,50 +62,51 @@ async def send_email_with_pdf(pdf_file):
     from_email = smtp_user
     to_email = recipient_email
 
-    message = EmailMessage()
-    message['From'] = from_email
-    message['To'] = to_email
-    message['Subject'] = "Beszélgetés PDF melléklete"
+    msg = MIMEMultipart()
+    msg['From'] = from_email
+    msg['To'] = to_email
+    msg['Subject'] = "Beszélgetés PDF melléklete"
 
     body = "Kérem, találja mellékelve a generált PDF fájlt a beszélgetésről."
-    message.set_content(body)
+    msg.attach(MIMEText(body, 'plain'))
 
     # PDF melléklet csatolása
     try:
-        async with aiofiles.open(pdf_file, "rb") as f:
-            pdf_data = await f.read()
-            message.add_attachment(pdf_data, maintype='application', subtype='pdf', filename=pdf_file)
+        with open(pdf_file, "rb") as f:
+            attach = MIMEApplication(f.read(), _subtype="pdf")
+            attach.add_header('Content-Disposition', 'attachment', filename=pdf_file)
+            msg.attach(attach)
 
         # Kapcsolódás az SMTP szerverhez és e-mail küldése
-        await aiosmtplib.send(
-            message,
-            hostname=smtp_server,
-            port=smtp_port,
-            username=smtp_user,
-            password=smtp_password,
-            start_tls=True
-        )
-        logging.info(f"E-mail sikeresen elküldve {to_email} címre.")
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        text = msg.as_string()
+        server.sendmail(from_email, to_email, text)
+        server.quit()
+        print(f"E-mail sikeresen elküldve {to_email} címre.")
     except Exception as e:
-        logging.error(f"E-mail küldési hiba: {e}")
+        print(f"E-mail küldési hiba: {e}")
 
-async def start_email_timer(thread_id, pdf_file_name):
+def start_email_timer(thread_id, pdf_file_name):
     """Elindít egy időzítőt, amely 10 perc múlva elküldi a PDF-et."""
-    global email_tasks
+    global email_timers
+    
+    # Ha már van egy időzítő ehhez a thread_id-hoz, töröljük (új üzenet érkezett, újra kell indítani)
+    if thread_id in email_timers and email_timers[thread_id] is not None:
+        email_timers[thread_id].cancel()
 
-    # Ha már van egy időzítő ehhez a thread_id-hoz, töröljük
-    if thread_id in email_tasks and email_tasks[thread_id] is not None:
-        email_tasks[thread_id].cancel()
+    # Új időzítő indítása (10 perc = 600 másodperc)
+    timer = threading.Timer(600, send_email_with_pdf, [pdf_file_name])
+    email_timers[thread_id] = timer
+    timer.start()
+    print(f"E-mail időzítő beállítva a PDF küldésére 10 perc múlva a {thread_id}-hoz.")
 
-    async def delayed_email():
-        await asyncio.sleep(600)  # 10 perc várakozás
-        await send_email_with_pdf(pdf_file_name)
-        logging.info(f"E-mail sent for thread {thread_id}.")
-
-    # Új időzítő indítása
-    task = asyncio.create_task(delayed_email())
-    email_tasks[thread_id] = task
-    logging.info(f"E-mail időzítő beállítva a PDF küldésére 10 perc múlva a {thread_id}-hoz.")
+async def initialize_openai_client():
+    """Aszinkron kliens és asszisztens inicializálás OpenAI-hoz."""
+    client = AsyncOpenAI(api_key=Config.API_KEY)
+    assistant = await client.beta.assistants.retrieve(Config.ASSISTANT_KEY)
+    return client, assistant
 
 app = Quart(__name__, static_folder='static')
 app = cors(app, allow_origin=Config.ALLOWED_ORIGINS)
@@ -121,12 +117,12 @@ async def index():
 
 @app.route('/start_chat', methods=['POST'])
 async def start_chat():
-    # Egyedi thread_id generálása
-    thread_id = str(uuid.uuid4())
+    client, assistant = await initialize_openai_client()
+    thread = await client.beta.threads.create()
+    thread_id = thread.id
 
     # Új beszélgetés indítása és mentése
     conversations[thread_id] = []
-    exchange_counts[thread_id] = 0  # Üzenetváltások számának inicializálása
     return jsonify({"thread_id": thread_id})
 
 @app.route('/send_message', methods=['POST'])
@@ -138,34 +134,26 @@ async def send_message():
     if not thread_id or not user_input:
         return jsonify({"error": "Missing thread_id or message"}), 400
 
-    # Ellenőrizzük, hogy a felhasználó nem érte-e el az üzenetküldési limitet
-    if exchange_counts.get(thread_id, 0) >= 3:
-        return jsonify({"error": "Conversation ended"}), 403
+    client, assistant = await initialize_openai_client()
 
     # Felhasználói üzenet mentése dátummal és időbélyeggel
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conversations.setdefault(thread_id, [])
     conversations[thread_id].append({"role": "user", "content": user_input, "timestamp": timestamp})
 
-    # Üzenetváltások számának növelése
-    exchange_counts[thread_id] = exchange_counts.get(thread_id, 0) + 1
+    await client.beta.threads.messages.create(
+        thread_id=thread_id, role="user", content=user_input
+    )
 
-    # OpenAI API hívás előkészítése
-    messages = [{"role": msg["role"], "content": msg["content"]} for msg in conversations[thread_id]]
-
-    # OpenAI API hívása aszinkron módon
     async def generate():
-        try:
-            response = await openai.ChatCompletion.acreate(
-                model=Config.OPENAI_MODEL,
-                messages=messages,
-                temperature=0.7,
-                stream=True  # Streamelés engedélyezése
-            )
-
+        async with client.beta.threads.runs.create_and_stream(
+            thread_id=thread_id,
+            assistant_id=assistant.id,
+            model=Config.OPENAI_MODEL,
+            instructions=Config.INSTRUCTIONS,
+        ) as stream:
             assistant_response = ""
-            async for chunk in response:
-                delta = chunk.choices[0].delta.get('content', '')
+            async for delta in stream.text_deltas:
                 assistant_response += delta
                 yield delta
 
@@ -175,20 +163,9 @@ async def send_message():
 
             # A beszélgetés frissítése/mentése JSON fájlba
             file_name = await save_conversation_to_file(thread_id)
-
-            # Fájl feltöltése SFTP-re
-            await upload_to_sftp(file_name)
-
-            # E-mail időzítő elindítása
-            await start_email_timer(thread_id, f"{thread_id}.pdf")
-
-            # Ha az üzenetváltások száma elérte a 3-at, jelezzük a frontendnek
-            if exchange_counts[thread_id] >= 3:
-                yield '[CONVERSATION_ENDED]'
-
-        except Exception as e:
-            logging.error(f"Hiba az OpenAI API hívása során: {e}")
-            yield "[Hiba a válasz generálása során]"
+            
+            # Fájl feltöltése FTP-re
+            await upload_to_ftp(file_name)
 
     return Response(generate(), content_type='text/plain')
 
@@ -196,41 +173,53 @@ async def save_conversation_to_file(thread_id):
     """Mentés vagy frissítés JSON fájlba, PDF generálása mellé és e-mail küldés."""
     json_file_name = f"{thread_id}.json"
     try:
-        # Beszélgetés adatainak mentése JSON fájlba aszinkron módon
-        async with aiofiles.open(json_file_name, "w", encoding="utf-8") as f:
-            await f.write(json.dumps(conversations[thread_id], ensure_ascii=False, indent=4))
+        # Ha a fájl létezik, frissítsük a meglévő adatokat
+        existing_data = []
+        if os.path.exists(json_file_name):
+            with open(json_file_name, "r", encoding="utf-8") as f:
+                existing_data = json.load(f)
+
+        # Új üzenetek hozzáadása
+        new_messages = [msg for msg in conversations[thread_id] if msg not in existing_data]
+        if new_messages:
+            existing_data.extend(new_messages)
+            with open(json_file_name, "w", encoding="utf-8") as f:
+                json.dump(existing_data, f, ensure_ascii=False, indent=4)
 
         # PDF generálása a teljes beszélgetésről
         pdf_file_name = create_pdf(thread_id, conversations[thread_id])
-        logging.info(f"PDF generated: {pdf_file_name}")
-
-        # JSON és PDF feltöltése SFTP-re
-        await upload_to_sftp(json_file_name)
-        await upload_to_sftp(pdf_file_name)
+        print(f"PDF generated: {pdf_file_name}")
+        
+        # JSON és PDF feltöltése FTP-re
+        await upload_to_ftp(json_file_name)  # JSON fájl feltöltése
+        await upload_to_ftp(pdf_file_name)   # PDF fájl feltöltése
+        
+        # E-mail időzítő elindítása (10 perc múlva küldjük el az e-mailt)
+        start_email_timer(thread_id, pdf_file_name)
 
     except Exception as e:
-        logging.error(f"Error saving conversation to file: {e}")
-
+        print(f"Error saving conversation to file: {e}")
+    
     return json_file_name
 
-# Stílusok definiálása a PDF generáláshoz
+# Define styles for PDF generation
 styles = getSampleStyleSheet()
 user_style = ParagraphStyle(
     'UserStyle',
     parent=styles['Normal'],
     fontName='DejaVuSans-Bold',
     fontSize=12,
-    leading=18,
+    leading=18,  # Increased line height for better readability
     textColor=colors.black,
     backColor=colors.lightgrey,
-    alignment=2  # Right align for user messages
+    alignment=1  # Right align for user messages
 )
 assistant_style = ParagraphStyle(
     'AssistantStyle',
     parent=styles['Normal'],
     fontName='DejaVuSans',
     fontSize=12,
-    leading=18,
+    leading=18,  # Increased line height for better readability
     textColor=colors.black,
     backColor=colors.whitesmoke,
     alignment=0  # Left align for assistant messages
@@ -239,8 +228,8 @@ assistant_style = ParagraphStyle(
 def create_pdf(thread_id, conversation_data):
     """Generates a PDF file of the entire conversation."""
     file_name = f"{thread_id}.pdf"
-    pdf_path = os.path.join(os.getcwd(), file_name)
-
+    pdf_path = os.path.join(os.getcwd(), file_name)  # PDF fájl mentése a futási könyvtárba
+    
     story = []
     doc = SimpleDocTemplate(pdf_path, pagesize=letter, rightMargin=50, leftMargin=50, topMargin=50, bottomMargin=50)
 
@@ -253,29 +242,30 @@ def create_pdf(thread_id, conversation_data):
         role_paragraph = Paragraph(f"<b>{role} ({timestamp}):</b>", user_style if role == "Felhasználó" else assistant_style)
         content_paragraph = Paragraph(content, user_style if role == "Felhasználó" else assistant_style)
 
+        # Mindig hozzáadjuk a beszélgetést a PDF-hez
         story.append(role_paragraph)
         story.append(content_paragraph)
         story.append(Spacer(1, 0.2 * inch))
 
     # PDF létrehozása
     doc.build(story)
-
-    return file_name
+    
+    return file_name  # Csak a fájlnév visszaadása
 
 def sanitize_text(content):
     """Removes unwanted patterns like sources from the text."""
-    return re.sub(r"【\d+:\d+†[\w\.]+】", '', content).replace('[CONVERSATION_ENDED]', '')
+    return re.sub(r"【\d+:\d+†[\w\.]+】", '', content)
 
-async def upload_to_sftp(file_name):
-    """Fájl feltöltése az SFTP szerverre."""
+async def upload_to_ftp(file_name):
+    """Fájl feltöltése az FTP szerverre."""
     try:
-        async with asyncssh.connect(Config.SFTP_SERVER, username=Config.SFTP_USER, password=Config.SFTP_PASS) as conn:
-            async with conn.start_sftp_client() as sftp:
-                await sftp.put(file_name, file_name)
-        logging.info(f"Sikeres feltöltés az SFTP szerverre: {file_name}")
-    except Exception as e:
-        logging.error(f"SFTP feltöltési hiba: {e}")
+        with ftplib.FTP(Config.FTP_SERVER) as ftp:
+            ftp.login(user=Config.FTP_USER, passwd=Config.FTP_PASS)
+            with open(file_name, "rb") as file:
+                ftp.storbinary(f"STOR {file_name}", file)
+        print(f"Successfully uploaded {file_name} to FTP server.")
+    except ftplib.all_errors as e:
+        print(f"FTP upload error: {e}")
 
 if __name__ == "__main__":
-    openai.api_key = Config.API_KEY
     app.run(host='0.0.0.0', port=5000)
