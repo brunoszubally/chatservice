@@ -160,7 +160,7 @@ assistant_style = ParagraphStyle(
 def create_pdf(thread_id, conversation_data):
     """Generates a PDF file of the conversation."""
     file_name = f"{thread_id}.pdf"
-    pdf_path = os.path.join("/mnt/data", file_name)
+    pdf_path = os.path.join(os.getcwd(), file_name)  # Mentés a futási könyvtárba
     
     story = []
     doc = SimpleDocTemplate(pdf_path, pagesize=letter, rightMargin=50, leftMargin=50, topMargin=50, bottomMargin=50)
@@ -184,7 +184,9 @@ def create_pdf(thread_id, conversation_data):
     
     doc.build(story)
     
-    return file_name
+    return file_name  # Csak a fájlnév visszaadása
+
+
 
 def sanitize_text(content):
     """Removes unwanted patterns like sources from the text."""
