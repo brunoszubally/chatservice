@@ -1,6 +1,7 @@
-from flask import Flask, request, jsonify, Response, send_from_directory
-from flask_cors import CORS
-from openai import OpenAI
+from quart import Quart, request, jsonify, Response, send_from_directory
+from quart_cors import cors
+import asyncio
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import os
 import json
@@ -18,7 +19,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
-import threading  # Időzítő
+import threading
 
 load_dotenv()  # Betölti a környezeti változókat a .env fájlból
 
@@ -98,23 +99,23 @@ def start_email_timer(thread_id, pdf_file_name):
     timer.start()
     print(f"E-mail időzítő beállítva a PDF küldésére 10 perc múlva a {thread_id}-hoz.")
 
-def initialize_openai_client():
-    """Initializes and returns the OpenAI client along with the assistant object."""
-    client = OpenAI(api_key=Config.API_KEY)
-    assistant = client.beta.assistants.retrieve(Config.ASSISTANT_KEY)
+async def initialize_openai_client():
+    """Aszinkron kliens és asszisztens inicializálás OpenAI-hoz."""
+    client = AsyncOpenAI(api_key=Config.API_KEY)
+    assistant = await client.beta.assistants.retrieve(Config.ASSISTANT_KEY)
     return client, assistant
 
-app = Flask(__name__, static_folder='static')
-CORS(app)
+app = Quart(__name__, static_folder='static')
+cors(app)
 
 @app.route('/')
-def index():
-    return send_from_directory(app.static_folder, 'index.html')
+async def index():
+    return await send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/start_chat', methods=['POST'])
-def start_chat():
-    client, assistant = initialize_openai_client()
-    thread = client.beta.threads.create()
+async def start_chat():
+    client, assistant = await initialize_openai_client()
+    thread = await client.beta.threads.create()
     thread_id = thread.id
 
     # Új beszélgetés indítása és mentése
@@ -122,34 +123,34 @@ def start_chat():
     return jsonify({"thread_id": thread_id})
 
 @app.route('/send_message', methods=['POST'])
-def send_message():
-    data = request.json
+async def send_message():
+    data = await request.json
     thread_id = data.get("thread_id")
     user_input = data.get("message")
 
     if not thread_id or not user_input:
         return jsonify({"error": "Missing thread_id or message"}), 400
 
-    client, assistant = initialize_openai_client()
+    client, assistant = await initialize_openai_client()
 
     # Felhasználói üzenet mentése dátummal és időbélyeggel
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conversations.setdefault(thread_id, [])
     conversations[thread_id].append({"role": "user", "content": user_input, "timestamp": timestamp})
 
-    client.beta.threads.messages.create(
+    await client.beta.threads.messages.create(
         thread_id=thread_id, role="user", content=user_input
     )
 
-    def generate():
-        with client.beta.threads.runs.create_and_stream(
+    async def generate():
+        async with client.beta.threads.runs.create_and_stream(
             thread_id=thread_id,
             assistant_id=assistant.id,
             model=Config.OPENAI_MODEL,
             instructions=Config.INSTRUCTIONS,
         ) as stream:
             assistant_response = ""
-            for delta in stream.text_deltas:
+            async for delta in stream.text_deltas:
                 assistant_response += delta
                 yield delta
 
@@ -158,14 +159,14 @@ def send_message():
             conversations[thread_id].append({"role": "assistant", "content": assistant_response, "timestamp": timestamp})
 
             # A beszélgetés frissítése/mentése JSON fájlba
-            file_name = save_conversation_to_file(thread_id)
+            file_name = await save_conversation_to_file(thread_id)
             
             # Fájl feltöltése FTP-re
-            upload_to_ftp(file_name)
+            await upload_to_ftp(file_name)
 
     return Response(generate(), content_type='text/plain')
 
-def save_conversation_to_file(thread_id):
+async def save_conversation_to_file(thread_id):
     """Mentés vagy frissítés JSON fájlba, PDF generálása mellé és e-mail küldés."""
     json_file_name = f"{thread_id}.json"
     try:
@@ -187,8 +188,8 @@ def save_conversation_to_file(thread_id):
         print(f"PDF generated: {pdf_file_name}")
         
         # JSON és PDF feltöltése FTP-re
-        upload_to_ftp(json_file_name)  # JSON fájl feltöltése
-        upload_to_ftp(pdf_file_name)   # PDF fájl feltöltése
+        await upload_to_ftp(json_file_name)  # JSON fájl feltöltése
+        await upload_to_ftp(pdf_file_name)   # PDF fájl feltöltése
         
         # E-mail időzítő elindítása (10 perc múlva küldjük el az e-mailt)
         start_email_timer(thread_id, pdf_file_name)
@@ -252,7 +253,7 @@ def sanitize_text(content):
     """Removes unwanted patterns like sources from the text."""
     return re.sub(r"【\d+:\d+†[\w\.]+】", '', content)
 
-def upload_to_ftp(file_name):
+async def upload_to_ftp(file_name):
     """Fájl feltöltése az FTP szerverre."""
     try:
         with ftplib.FTP(Config.FTP_SERVER) as ftp:
