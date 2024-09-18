@@ -3,5 +3,6 @@ Flask-Cors
 openai
 python-dotenv
 gunicorn
-werkzeug
 reportlab
+smtplib
+threading

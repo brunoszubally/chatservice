@@ -43,8 +43,9 @@ class Config:
     SMTP_PASS = os.getenv("SMTP_PASS")
     RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 
-# Globális változó az időzítőhöz
-email_timer = None
+# Tároló a beszélgetések és időzítők számára
+conversations = {}
+email_timers = {}
 
 def send_email_with_pdf(pdf_file):
     """E-mail küldése a PDF fájllal mellékletként."""
@@ -85,15 +86,16 @@ def send_email_with_pdf(pdf_file):
 
 def start_email_timer(thread_id, pdf_file_name):
     """Elindít egy időzítőt, amely 10 perc múlva elküldi a PDF-et."""
-    global email_timer
+    global email_timers
     
-    # Ha már van egy időzítő, töröljük (új üzenet érkezett, újra kell indítani)
-    if email_timer is not None:
-        email_timer.cancel()
+    # Ha már van egy időzítő ehhez a thread_id-hoz, töröljük (új üzenet érkezett, újra kell indítani)
+    if thread_id in email_timers and email_timers[thread_id] is not None:
+        email_timers[thread_id].cancel()
 
     # Új időzítő indítása (10 perc = 600 másodperc)
-    email_timer = threading.Timer(180, send_email_with_pdf, [pdf_file_name])
-    email_timer.start()
+    timer = threading.Timer(600, send_email_with_pdf, [pdf_file_name])
+    email_timers[thread_id] = timer
+    timer.start()
     print(f"E-mail időzítő beállítva a PDF küldésére 10 perc múlva a {thread_id}-hoz.")
 
 def initialize_openai_client():
@@ -104,9 +106,6 @@ def initialize_openai_client():
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
-
-# Tároló a beszélgetések számára
-conversations = {}
 
 @app.route('/')
 def index():
