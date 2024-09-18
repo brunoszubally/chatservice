@@ -2,7 +2,7 @@ quart
 quart-cors
 openai
 python-dotenv
-gunicorn
+hypercorn
 reportlab
 aiohttp
 werkzeug
