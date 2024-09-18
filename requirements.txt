@@ -4,5 +4,4 @@ openai
 python-dotenv
 gunicorn
 reportlab
-smtplib
-threading
+werkzeug
