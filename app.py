@@ -93,21 +93,26 @@ def save_conversation_to_file(thread_id):
     """Mentés vagy frissítés JSON fájlba."""
     file_name = f"{thread_id}.json"
     try:
-        # Ha a fájl már létezik, olvassuk be és frissítsük
+        # Ha a fájl létezik, olvassuk be a meglévő beszélgetést
+        existing_data = []
         if os.path.exists(file_name):
             with open(file_name, "r", encoding="utf-8") as f:
                 existing_data = json.load(f)
-                existing_data.extend(conversations[thread_id])
+
+        # Új üzenetek, amelyek nincsenek még a fájlban
+        new_messages = [msg for msg in conversations[thread_id] if msg not in existing_data]
+
+        # Csak az új üzenetek hozzáadása
+        if new_messages:
+            existing_data.extend(new_messages)
             with open(file_name, "w", encoding="utf-8") as f:
                 json.dump(existing_data, f, ensure_ascii=False, indent=4)
-        else:
-            # Ha a fájl nem létezik, hozzuk létre és írjuk bele az adatokat
-            with open(file_name, "w", encoding="utf-8") as f:
-                json.dump(conversations[thread_id], f, ensure_ascii=False, indent=4)
+
     except Exception as e:
         print(f"Error saving conversation to file: {e}")
     
     return file_name
+
 
 def upload_to_ftp(file_name):
     """Fájl feltöltése az FTP szerverre."""
