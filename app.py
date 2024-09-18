@@ -151,10 +151,9 @@ async def send_message():
 
             # Ha elértük a 10 kérdés-választ, jelezzük a frontendnek
             if qa_count[thread_id] >= 10:
-                yield "\n\nBUTTON_SHOW\n"  # A gomb megjelenítését jelző üzenet
-
-            file_name = await save_conversation_to_file(thread_id)
-            await upload_to_ftp(file_name)
+                yield json.dumps({"show_button": True}) + "\n"
+            else:
+                yield json.dumps({"message": assistant_response}) + "\n"
 
     return Response(generate(), content_type='text/plain')
 
